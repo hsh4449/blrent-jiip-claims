@@ -152,7 +152,11 @@ def _send_one_batch(payload_msgs):
 
 
 def send_plan(plan, *, dry_run, trigger_type, triggered_by, sb=None):
-    """plan 을 실제 발송 + 로그 기록. dry_run=True 면 발송하지 않음."""
+    """plan 을 실제 발송 + 로그 기록.
+
+    안전 게이트: jiip_settings.send_armed=false 면 dry_run 으로 강제 전환.
+    1회 발송 성공 후 send_armed 는 자동 false 로 복귀 (1회용 무장).
+    """
     if sb is None:
         sb = get_client()
 
@@ -163,8 +167,21 @@ def send_plan(plan, *, dry_run, trigger_type, triggered_by, sb=None):
     if not all_msgs:
         return {'sent': 0, 'failed': 0, 'dry_run': dry_run, 'count': 0}
 
+    # 발송 잠금 체크 (dry_run 이 아닌 경우만)
+    armed = False
+    if not dry_run:
+        settings = sb.table('jiip_settings').select('send_armed,armed_by').eq('id', 1).single().execute().data
+        armed = bool(settings.get('send_armed'))
+        if not armed:
+            print(f'[LOCK] send_armed=false → 강제 dry_run 으로 전환 (triggered_by={triggered_by})')
+            dry_run = True
+
     if dry_run:
-        return {'sent': 0, 'failed': 0, 'dry_run': True, 'count': len(all_msgs), 'messages': all_msgs}
+        return {
+            'sent': 0, 'failed': 0, 'dry_run': True,
+            'count': len(all_msgs), 'messages': all_msgs,
+            'blocked_by_lock': (not armed and trigger_type != 'preview'),
+        }
 
     # 실제 발송
     payload_msgs = []
@@ -215,5 +232,15 @@ def send_plan(plan, *, dry_run, trigger_type, triggered_by, sb=None):
         })
     if log_rows:
         sb.table('jiip_sms_logs').insert(log_rows).execute()
+
+    # 1회용 무장 자동 해제 (실제 발송 시도된 직후, 성공/실패 무관)
+    sb.table('jiip_settings').update({
+        'send_armed': False,
+        'armed_at': None,
+        'armed_by': None,
+        'updated_at': datetime.now(KST).isoformat(),
+        'updated_by': f'auto-disarm:{triggered_by}',
+    }).eq('id', 1).execute()
+    print('[LOCK] 발송 후 send_armed 자동 false 복귀')
 
     return {'sent': sent, 'failed': failed, 'count': len(all_msgs), 'group_id': group_id, 'status_code': status_code}
