@@ -1,0 +1,45 @@
+name: Daily Unpaid Notifier
+
+on:
+  # KST 09:00 = UTC 00:00
+  schedule:
+    - cron: '0 0 * * *'
+  # 수동 트리거 (Actions 탭에서 Run workflow)
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'DRY RUN (실제 발송 안함, 페이로드만 로그)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Run notifier
+        env:
+          SUPABASE_URL:      ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:      ${{ secrets.SUPABASE_KEY }}
+          IMS_ID:            ${{ secrets.IMS_ID }}
+          IMS_PW:            ${{ secrets.IMS_PW }}
+          SOLAPI_API_KEY:    ${{ secrets.SOLAPI_API_KEY }}
+          SOLAPI_API_SECRET: ${{ secrets.SOLAPI_API_SECRET }}
+          SOLAPI_FROM:       ${{ secrets.SOLAPI_FROM }}
+          OWNER_NAME:        ${{ vars.OWNER_NAME || '신동석부장' }}
+          NOTIFY_OWNER:      ${{ vars.NOTIFY_OWNER || 'true' }}
+          DRY_RUN:           ${{ github.event.inputs.dry_run || 'false' }}
+        run: python notifier.py
