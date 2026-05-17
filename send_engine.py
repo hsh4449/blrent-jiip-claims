@@ -14,6 +14,19 @@ from jiip_vehicles import get_jiip_vehicles, OWNER_NAME
 from solapi_sender import _auth_header, _byte_len, API_URL, SOLAPI_FROM
 import requests
 
+# ─────────────────────────────────────────────────────────────────────────
+# 🚨 MASTER KILL SWITCH 🚨
+#
+# True 인 동안 모든 발송 경로(자동/수동/테스트)가 dry_run 으로 강제 전환됩니다.
+# 사용자(황성현)가 명시적으로 "보내라" 또는 "킬스위치 풀어줘" 라고 요청한 경우에만
+# False 로 바꿔서 git push 할 것. 절대 자동으로 풀지 마세요.
+# 풀린 후에도 jiip_settings.send_armed 게이트 + 사용자 클릭 확인이 추가로 필요합니다.
+#
+# 설정 이유: 2026-05-17 사고 후 사용자 요청
+# "내가 프로그램 완성되서 보내라고 하기 전까진 절대 테스트문자도 보내선 안됨"
+# ─────────────────────────────────────────────────────────────────────────
+MASTER_KILL_SWITCH = True
+
 
 def fmt_won(n):
     return f'{int(n):,}원'
@@ -167,6 +180,11 @@ def send_plan(plan, *, dry_run, trigger_type, triggered_by, sb=None):
     if not all_msgs:
         return {'sent': 0, 'failed': 0, 'dry_run': dry_run, 'count': 0}
 
+    # 🚨 MASTER KILL SWITCH — 최상위 게이트
+    if MASTER_KILL_SWITCH and not dry_run:
+        print(f'[KILL_SWITCH] MASTER_KILL_SWITCH=True → 강제 dry_run (triggered_by={triggered_by})')
+        dry_run = True
+
     # 발송 잠금 체크 (dry_run 이 아닌 경우만)
     armed = False
     if not dry_run:
@@ -180,7 +198,8 @@ def send_plan(plan, *, dry_run, trigger_type, triggered_by, sb=None):
         return {
             'sent': 0, 'failed': 0, 'dry_run': True,
             'count': len(all_msgs), 'messages': all_msgs,
-            'blocked_by_lock': (not armed and trigger_type != 'preview'),
+            'blocked_by_kill_switch': MASTER_KILL_SWITCH,
+            'blocked_by_lock': (not armed and trigger_type != 'preview' and not MASTER_KILL_SWITCH),
         }
 
     # 실제 발송
