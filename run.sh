@@ -1,9 +1,10 @@
 #!/bin/bash
-# Vultr cron 실행 진입점. 환경변수는 .env 에서 로드.
+# Vultr cron 진입점. .env 로드 후 인자로 받은 모듈 실행.
+# 사용: ./run.sh crawl_only | ./run.sh auto_send | ./run.sh queue_worker
 set -e
 cd "$(dirname "$0")"
+mkdir -p logs
 set -a
 . ./.env
 set +a
-mkdir -p logs
-exec ./venv/bin/python notifier.py
+exec ./venv/bin/python "$1.py"
