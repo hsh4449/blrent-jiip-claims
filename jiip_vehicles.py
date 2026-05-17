@@ -5,6 +5,7 @@ Supabase에서 신동석부장 지입 차량 목록을 가져온다.
 - vehicles.customer_name 이 OWNER_NAME 과 일치하는 차량을 반환.
 """
 import os
+import re
 from supabase import create_client
 
 SUPABASE_URL = os.environ['SUPABASE_URL']
@@ -33,16 +34,22 @@ def get_jiip_vehicles():
         .data
     )
 
-    return [
-        {
-            'car_number': v['car_number'],
-            'model': v.get('model') or '',
+    out = []
+    for v in vehicles:
+        car_number = v.get('car_number') or ''
+        if not car_number:
+            continue
+        # vehicles.model 에 차량번호가 prefix 로 들어있는 경우 제거
+        # ("106호9433 BMW 520i" → "BMW 520i")
+        model = (v.get('model') or '').strip()
+        model = re.sub(r'^\d+[가-힣]+\d+\s*', '', model).strip()
+        out.append({
+            'car_number': car_number,
+            'model': model,
             'owner': v.get('customer_name') or '',
             'owner_phone': v.get('customer_phone') or '',
-        }
-        for v in vehicles
-        if v.get('car_number')
-    ]
+        })
+    return out
 
 
 if __name__ == '__main__':

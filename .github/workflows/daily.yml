@@ -1,10 +1,8 @@
 name: Daily Unpaid Notifier
 
 on:
-  # KST 09:00 = UTC 00:00
-  schedule:
-    - cron: '0 0 * * *'
-  # 수동 트리거 (Actions 탭에서 Run workflow)
+  # 운영 cron 은 Vultr 서버(crontab)에서 KST 09시에 실행 — 중복 발송 방지를 위해
+  # GitHub Actions schedule 은 비활성화. 비상시 수동 트리거만 가능.
   workflow_dispatch:
     inputs:
       dry_run:

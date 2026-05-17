@@ -3,6 +3,9 @@
 신동석부장 지입차량의 사고대차 미입금 청구건을 매일 오전 9시(KST)에
 보험사 담당자별로 1통씩 묶어서 SMS 발송하는 자동화.
 
+운영 cron 은 **Vultr 서버 (158.247.239.114)** crontab 에서 실행.
+GitHub Actions 는 비상용 수동 트리거만 유지 (중복 발송 방지).
+
 ## 흐름
 1. Supabase `vehicles` 테이블에서 `customer_name='신동석부장'` + `contracts.status='지입'` 인 차량 조회
 2. 각 차량번호로 imsform.com 검색 (회사 IMS 계정 사용)
