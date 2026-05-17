@@ -1,0 +1,16 @@
+[Unit]
+Description=blrent-jiip-claims queue daemon (2s polling)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/blrent-jiip-claims
+EnvironmentFile=/root/blrent-jiip-claims/.env
+ExecStart=/root/blrent-jiip-claims/venv/bin/python queue_daemon.py
+Restart=always
+RestartSec=5
+StandardOutput=append:/root/blrent-jiip-claims/logs/queue_daemon.log
+StandardError=append:/root/blrent-jiip-claims/logs/queue_daemon.log
+
+[Install]
+WantedBy=multi-user.target
