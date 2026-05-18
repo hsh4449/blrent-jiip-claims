@@ -8,7 +8,14 @@ IMS 크롤만 수행 → jiip_unpaid_snapshots 테이블 upsert.
 from datetime import datetime
 from db import get_client, KST
 from jiip_vehicles import get_jiip_vehicles
-from ims_crawler import collect_unpaid
+from ims_crawler import collect_all
+
+
+SNAPSHOT_COLS = (
+    'claim_id', 'registration_id', 'rent_car_number', 'car_model', 'customer_name',
+    'customer_car_number', 'insurer', 'insurance_manager_name', 'insurance_manager_phone',
+    'billing_amount', 'billing_date', 'delivered_at', 'return_date', 'claim_state',
+)
 
 
 def main():
@@ -21,47 +28,37 @@ def main():
     if not vehicles:
         return
 
-    unpaid = collect_unpaid(vehicles)
-    print(f'[2] 미입금 raw {len(unpaid)}건')
-
-    if not unpaid:
-        # 기존 active 모두 비활성화 (전부 입금 완료된 케이스)
-        sb.table('jiip_unpaid_snapshots').update({'is_active': False}).eq('is_active', True).execute()
-        print('[3] 미입금 0건 — 기존 active 모두 비활성화')
-        return
+    all_records = collect_all(vehicles)
+    print(f'[2] 전체 청구 {len(all_records)}건')
 
     now_iso = datetime.now(KST).isoformat()
-    rows = []
-    for r in unpaid:
-        rows.append({
-            'claim_id': r['claim_id'],
-            'registration_id': r.get('registration_id'),
-            'rent_car_number': r['rent_car_number'],
-            'car_model': r.get('car_model'),
-            'customer_name': r.get('customer_name'),
-            'customer_car_number': r.get('customer_car_number'),
-            'insurer': r.get('insurer'),
-            'insurance_manager_name': r.get('insurance_manager_name'),
-            'insurance_manager_phone': r.get('insurance_manager_phone'),
-            'billing_amount': r.get('billing_amount', 0),
-            'billing_date': r.get('billing_date') or None,
-            'delivered_at': r.get('delivered_at') or None,
-            'return_date': r.get('return_date') or None,
-            'claim_state': r.get('claim_state'),
+
+    # jiip_all_claims (통계용): 모든 청구, paid_at 포함
+    all_rows = []
+    for r in all_records:
+        all_rows.append({
+            **{k: r.get(k) for k in SNAPSHOT_COLS},
+            'paid_at': r.get('paid_at'),
             'last_crawled_at': now_iso,
-            'is_active': True,
         })
+    if all_rows:
+        sb.table('jiip_all_claims').upsert(all_rows, on_conflict='claim_id').execute()
+        print(f'[3] jiip_all_claims upsert {len(all_rows)}건')
 
-    sb.table('jiip_unpaid_snapshots').upsert(rows, on_conflict='claim_id').execute()
-    print(f'[3] upsert {len(rows)}건')
+    # jiip_unpaid_snapshots (발송 캐시): 미입금만
+    unpaid = [r for r in all_records if not r.get('paid_at')]
+    if unpaid:
+        unpaid_rows = [{**{k: r.get(k) for k in SNAPSHOT_COLS}, 'last_crawled_at': now_iso, 'is_active': True} for r in unpaid]
+        sb.table('jiip_unpaid_snapshots').upsert(unpaid_rows, on_conflict='claim_id').execute()
+        print(f'[4] jiip_unpaid_snapshots upsert {len(unpaid_rows)}건')
 
-    # 이번 크롤에 없는 active 행 = 입금완료/취소 등 사라진 청구 → 비활성화
-    current_ids = [r['claim_id'] for r in rows]
+    # 이번 크롤에서 미입금 아닌 active 행 = 입금완료/취소 → 비활성화
+    unpaid_ids = {r['claim_id'] for r in unpaid}
     active_rows = sb.table('jiip_unpaid_snapshots').select('claim_id').eq('is_active', True).execute().data
-    stale_ids = [r['claim_id'] for r in active_rows if r['claim_id'] not in current_ids]
+    stale_ids = [r['claim_id'] for r in active_rows if r['claim_id'] not in unpaid_ids]
     if stale_ids:
         sb.table('jiip_unpaid_snapshots').update({'is_active': False}).in_('claim_id', stale_ids).execute()
-        print(f'[4] 사라진 청구 {len(stale_ids)}건 비활성화')
+        print(f'[5] 사라진/입금완료 {len(stale_ids)}건 → is_active=false')
 
     ended = datetime.now(KST)
     print(f'=== CRAWL 완료 {ended.strftime("%Y-%m-%d %H:%M:%S")} KST ({(ended - started).seconds}s) ===')

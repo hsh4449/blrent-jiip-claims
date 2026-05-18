@@ -32,14 +32,15 @@ def fmt_won(n):
     return f'{int(n):,}원'
 
 
-def load_active_snapshots(sb):
-    return (
-        sb.table('jiip_unpaid_snapshots')
-        .select('*')
-        .eq('is_active', True)
-        .execute()
-        .data
-    )
+def load_active_snapshots(sb, apply_cutoff=True):
+    """is_active=true 인 스냅샷. apply_cutoff=true 면 settings.cutoff_billing_date 이상만."""
+    q = sb.table('jiip_unpaid_snapshots').select('*').eq('is_active', True)
+    if apply_cutoff:
+        settings = sb.table('jiip_settings').select('cutoff_billing_date').eq('id', 1).single().execute().data
+        cutoff = settings.get('cutoff_billing_date')
+        if cutoff:
+            q = q.gte('billing_date', cutoff)
+    return q.execute().data
 
 
 def load_excluded_ids(sb):

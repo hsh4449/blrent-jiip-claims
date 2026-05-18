@@ -81,21 +81,16 @@ def search_vehicle(session, car_number):
     return claims
 
 
-def is_unpaid(claim):
-    """청구금액 > 0 AND 입금일 null 인지 판정"""
+def to_record(claim, vehicle_meta):
+    """청구 raw → 통일된 dict (paid_at 포함). 청구금액 0 이면 None."""
     try:
         billing = int(claim.get('claim_total_cost') or 0)
     except (ValueError, TypeError):
         billing = 0
     if billing <= 0:
-        return False
-    return not claim.get('claim_done_at')
+        return None
 
-
-def to_unpaid_record(claim, vehicle_meta):
-    """미입금 건 → 알림용 dict로 변환"""
     rent_car = claim.get('rent_car_number') or ''
-    # 메인 차량이 우리 차가 아닐 수도 있음(교체건). 차량번호 매칭 필터는 호출부에서 처리.
     return {
         'claim_id': str(claim.get('id') or ''),
         'registration_id': claim.get('registration_id') or '',
@@ -106,35 +101,31 @@ def to_unpaid_record(claim, vehicle_meta):
         'insurer': claim.get('insurance_company') or '',
         'insurance_manager_name': claim.get('claim_insurance_manager') or '',
         'insurance_manager_phone': parse_phone(claim.get('claim_insurance_contact')),
-        'billing_amount': int(claim.get('claim_total_cost') or 0),
-        'billing_date': (claim.get('claim_at') or '')[:10],
-        'delivered_at': (claim.get('delivered_at') or '')[:10],
-        'return_date': (claim.get('return_date') or '')[:10],
+        'billing_amount': billing,
+        'billing_date': (claim.get('claim_at') or '')[:10] or None,
+        'delivered_at': (claim.get('delivered_at') or '')[:10] or None,
+        'return_date': (claim.get('return_date') or '')[:10] or None,
         'claim_state': claim.get('claim_state') or '',
+        'paid_at': (claim.get('claim_done_at') or '')[:10] or None,
     }
 
 
-def collect_unpaid(vehicles):
-    """전체 차량 리스트 → 미입금 건 리스트.
-    중복(같은 claim_id) 제거.
-    """
+def collect_all(vehicles):
+    """전체 차량 리스트 → 모든 청구 (입금 완료 포함). 중복 제거. paid_at 포함."""
     session = login()
     print(f'[LOGIN] 성공')
 
-    unpaid = {}
+    records = {}
     for v in vehicles:
         car_number = v['car_number']
-        # 끝 4자리만 추출 (IMS 검색이 한글 미포함도 가능)
         suffix = re.sub(r'[^\d]', '', car_number)[-4:]
         if not suffix:
             continue
-
         print(f'[SEARCH] {car_number} (suffix={suffix})')
         claims = search_vehicle(session, suffix)
         print(f'  → {len(claims)}건 raw')
 
         for c in claims:
-            # 메인 또는 details 의 rent_car_number 가 우리 차량과 매칭되는지
             our_match = False
             rc = c.get('rent_car_number') or ''
             if rc.endswith(suffix):
@@ -148,25 +139,32 @@ def collect_unpaid(vehicles):
                         break
             if not our_match:
                 continue
-            if not is_unpaid(c):
+            rec = to_record(c, v)
+            if rec is None:
                 continue
-            rec = to_unpaid_record(c, v)
-            unpaid[rec['claim_id']] = rec
+            records[rec['claim_id']] = rec
 
-    result = list(unpaid.values())
-    print(f'[TOTAL] 미입금 {len(result)}건')
+    result = list(records.values())
+    paid = sum(1 for r in result if r.get('paid_at'))
+    print(f'[TOTAL] 전체 {len(result)}건 (입금완료 {paid}건 / 미입금 {len(result)-paid}건)')
     return result
+
+
+def collect_unpaid(vehicles):
+    """입금 미완료 건만 반환 (하위 호환). collect_all 결과에서 paid_at null 인 것만."""
+    return [r for r in collect_all(vehicles) if not r.get('paid_at')]
 
 
 if __name__ == '__main__':
     from jiip_vehicles import get_jiip_vehicles
     vs = get_jiip_vehicles()
     print(f'\n대상 차량 {len(vs)}대\n')
-    rows = collect_unpaid(vs)
+    rows = collect_all(vs)
     print()
-    for r in rows:
+    for r in rows[:20]:
+        paid_mark = '✓' if r.get('paid_at') else ' '
         print(
-            f"  [{r['rent_car_number']}] {r['customer_name']:<8} "
-            f"청구일 {r['billing_date']} / 금액 {r['billing_amount']:>10,} / "
-            f"담당 {r['insurance_manager_name']}({r['insurance_manager_phone'] or '연락처없음'})"
+            f"  {paid_mark} [{r['rent_car_number']}] {r.get('customer_name','')[:6]:<8} "
+            f"청구 {r.get('billing_date') or '-'} / 입금 {r.get('paid_at') or '-'} / "
+            f"{r['billing_amount']:>10,}"
         )
