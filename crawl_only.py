@@ -29,7 +29,15 @@ def main():
         return
 
     all_records = collect_all(vehicles)
-    print(f'[2] 전체 청구 {len(all_records)}건')
+    print(f'[2] 전체 청구 {len(all_records)}건 (cutoff 적용 전)')
+
+    # cutoff 적용: settings.cutoff_billing_date 이전 또는 billing_date null 인 건은 저장 안 함
+    settings = sb.table('jiip_settings').select('cutoff_billing_date').eq('id', 1).single().execute().data
+    cutoff = settings.get('cutoff_billing_date') if settings else None
+    if cutoff:
+        before = len(all_records)
+        all_records = [r for r in all_records if r.get('billing_date') and r['billing_date'] >= cutoff]
+        print(f'[2-cutoff] cutoff={cutoff} 적용 → {before} → {len(all_records)}건 (이전 건 {before-len(all_records)} 제외)')
 
     now_iso = datetime.now(KST).isoformat()
 
